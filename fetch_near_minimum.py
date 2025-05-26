@@ -1,8 +1,8 @@
 import requests
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from urllib.parse import urlencode
 
-BASE_URL = "https://iss.moex.com/iss/"
-
+BASE_URL = "https://iss.moex.com/iss/"     # оставь как в твоём проекте                             
 
 def fetch_json(url, params=None):
     resp = requests.get(url, params=params)
@@ -26,60 +26,118 @@ def get_top_securities(limit=200):
     return secids
 
 
-def get_min_price(secid, start, end):
+def get_min_price(secid, start, end, count_batch = 100):
+    """Минимальный дневной LOW за последние 4 года (GAZP → TQBR)."""
+    if count_batch > 100:
+        count_batch = 100
+
     url = (
         BASE_URL
-        + f"history/engines/stock/markets/shares/boards/TQBR/securities/{secid}.json"
+        + f"history/engines/stock/markets/shares/boards/TQBR/"
+        + f"securities/{secid}.json"
     )
-    params = {
-        "from": start.strftime("%Y-%m-%d"),
-        "till": end.strftime("%Y-%m-%d"),
-        "iss.meta": "off",
-        "iss.only": "history",
-        "history.columns": "CLOSE",
-    }
-    data = fetch_json(url, params)
-    close_idx = data["history"]["columns"].index("CLOSE")
-    closes = [row[close_idx] for row in data["history"]["data"] if row[close_idx] is not None]
-    return min(closes)
+
+    lows, start = [], 0
+    # print(f'start_date 1 {start}')
+    # print(f'start_date 1 {start.strftime("%Y-%m-%d")}')
+    # print(f'end_date 1 {end.strftime("%Y-%m-%d")}')
+    while True:
+        params = {
+            "from": start,
+            "till": end,
+            "iss.meta": "off",
+            "iss.only": "history",
+            "history.columns": "CLOSE",
+            "limit": count_batch,
+            "start": start,
+        }
+
+        full_url = f"{url}?{urlencode(params)}"
+        # print("GET", full_url)
+
+        data  = fetch_json(url, params)
+        rows  = data["history"]["data"]          # [[LOW], ...]
+        # print(f'rows {len(rows)}')
+        if not rows:                             # страницы кончились
+            break
+        lows.extend(row[0] for row in rows if row[0] is not None)
+        if len(rows) < count_batch:                     # последняя страница
+            break
+        start += count_batch                            # следующая порция
+    return min(lows) if lows else None
 
 
-def get_current_price(secid):
+def get_current_price(secid: str, board: str = "TQBR") -> float | None:
+    """
+    Возвращает текущую цену бумаги (LAST).  
+    Если LAST отсутствует (например, биржа закрыта), берёт PREVCLOSE.
+    Печатает фактически отправляемый HTTP-запрос.
+    """
     url = (
         BASE_URL
-        + f"engines/stock/markets/shares/boards/TQBR/securities/{secid}.json"
+        + f"engines/stock/markets/shares/boards/{board}/"
+        + f"securities/{secid}.json"
     )
+
     params = {
         "iss.meta": "off",
         "iss.only": "marketdata",
-        "marketdata.columns": "CLOSE",
+        "marketdata.columns": "SECID,LAST,PREVCLOSE",
     }
-    data = fetch_json(url, params)
-    close_idx = data["marketdata"]["columns"].index("CLOSE")
-    close_price = data["marketdata"]["data"][0][close_idx]
-    return close_price
 
+    full_url = f"{url}?{urlencode(params)}"
+    # print("GET", full_url)
+
+    data    = fetch_json(url, params)
+    cols    = data["marketdata"]["columns"]
+    values  = data["marketdata"]["data"][0]
+
+    # Индексы нужных колонок
+    idx_last       = cols.index("LAST")       if "LAST"       in cols else None
+    idx_prevclose  = cols.index("PREVCLOSE")  if "PREVCLOSE"  in cols else None
+
+    last_price = values[idx_last] if idx_last is not None else None
+    if last_price is None:                    # биржа закрыта → используем предыдущий close
+        last_price = values[idx_prevclose] if idx_prevclose is not None else None
+
+    return float(last_price) if last_price is not None else None
 
 def main():
-    end_date = datetime.utcnow().date()
-    start_date = end_date - timedelta(days=365 * 4)
+    start_date = (date.today() - timedelta(days=4 * 365)).isoformat()
+    print(f'start_date {start_date}')
+    end_date   = date.today().isoformat()
+    print(f'end_date {end_date}')
 
-    securities = get_top_securities()
+    limit_top = 200
+    securities = get_top_securities(limit_top)
+    count_index_current = len(securities)
+    print(f'top {limit_top} = {count_index_current} штук')
+    if count_index_current == 0:
+        raise Exception('не получили не одной компании из топов')
     result = []
     for secid in securities:
+        print(f'\nsecid {secid}')
         try:
             min_price = get_min_price(secid, start_date, end_date)
+            print(f'min_price {min_price}')
             current_price = get_current_price(secid)
+            print(f'current_price {current_price}')
         except Exception:
-            continue
+            # raise Exception('не смогли получить минимальное и текущее значение {secid}')
+            print('не смогли получить минимальное и текущее значение {secid}')
+            # continue
         if min_price == 0:
+            print(f'минимальная цена {secid} = 0')
             continue
         diff = (current_price - min_price) / min_price
         if diff <= 0.15:
+            print(f'diff у {secid} = {diff}')
             result.append((secid, diff, current_price, min_price))
+        else:
+            print(f'diff у {secid} = {diff}')
 
     result.sort(key=lambda x: x[1])
-
+    print(len(result))
     for secid, diff, current, min_price in result[:20]:
         print(f"{secid}: {diff*100:.2f}% above min ({current} vs {min_price})")
 
