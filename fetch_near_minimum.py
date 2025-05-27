@@ -22,8 +22,17 @@ def get_top_securities(limit=200):
     data = fetch_json(url, params)
 
     secid_idx = data["securities"]["columns"].index("SECID")
-    secids = [row[secid_idx] for row in data["securities"]["data"]]
-    return secids
+    valtoday_idx = data["marketdata"]["columns"].index("VALTODAY")
+
+    result = []
+    securities_rows = data["securities"]["data"]
+    market_rows = data["marketdata"]["data"]
+    for sec_row, market_row in zip(securities_rows, market_rows):
+        secid = sec_row[secid_idx]
+        volume = market_row[valtoday_idx]
+        result.append((secid, volume))
+
+    return result
 
 
 def get_min_price(secid, start, end, count_batch = 100):
@@ -116,7 +125,7 @@ def main():
         raise Exception('не получили не одной компании из топов')
     result = []
     result_more = []
-    for i, secid in enumerate(securities):
+    for i, (secid, volume) in enumerate(securities):
         print(f'secid {secid} {i+1}/{count_index_current}')
         try:
             min_price = get_min_price(secid, start_date, end_date)
@@ -135,22 +144,22 @@ def main():
         diff = (current_price - min_price) / min_price
         if diff <= 0.15:
             print(f'diff у {secid} = {diff}')
-            result.append((secid, diff, current_price, min_price))
+            result.append((secid, diff, current_price, min_price, volume))
         elif diff <= 1:
             print(f'diff у {secid} = {diff}')
-            result_more.append((secid, diff, current_price, min_price))
+            result_more.append((secid, diff, current_price, min_price, volume))
         else:
             print(f'diff у {secid} = {diff}')
 
     result.sort(key=lambda x: x[1])
     print(len(result))
-    for secid, diff, current, min_price in result:
-        print(f"{secid}: {diff*100:.2f}% above min ({current} vs {min_price})")
+    for secid, diff, current, min_price, volume in result:
+        print(f"{secid}: {diff*100:.2f}% above min ({current} vs {min_price}) volume {volume}")
     print(f'\n\n diff меньше 1\n')
     result_more.sort(key=lambda x: x[1])
     print(len(result_more))
-    for secid, diff, current, min_price in result_more:
-        print(f"{secid}: {diff*100:.2f}% above min ({current} vs {min_price})")
+    for secid, diff, current, min_price, volume in result_more:
+        print(f"{secid}: {diff*100:.2f}% above min ({current} vs {min_price}) volume {volume}")
 
 
 if __name__ == "__main__":
