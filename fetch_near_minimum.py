@@ -108,37 +108,48 @@ def main():
     end_date   = date.today().isoformat()
     print(f'end_date {end_date}')
 
-    limit_top = 200
+    limit_top = 100
     securities = get_top_securities(limit_top)
     count_index_current = len(securities)
     print(f'top {limit_top} = {count_index_current} штук')
     if count_index_current == 0:
         raise Exception('не получили не одной компании из топов')
     result = []
-    for secid in securities:
-        print(f'\nsecid {secid}')
+    result_more = []
+    for i, secid in enumerate(securities):
+        print(f'secid {secid} {i+1}/{count_index_current}')
         try:
             min_price = get_min_price(secid, start_date, end_date)
             print(f'min_price {min_price}')
             current_price = get_current_price(secid)
             print(f'current_price {current_price}')
+            if current_price is None:
+                continue
         except Exception:
             # raise Exception('не смогли получить минимальное и текущее значение {secid}')
             print('не смогли получить минимальное и текущее значение {secid}')
             # continue
         if min_price == 0:
-            print(f'минимальная цена {secid} = 0')
+            # print(f'минимальная цена {secid} = 0')
             continue
         diff = (current_price - min_price) / min_price
         if diff <= 0.15:
             print(f'diff у {secid} = {diff}')
             result.append((secid, diff, current_price, min_price))
+        elif diff <= 1:
+            print(f'diff у {secid} = {diff}')
+            result_more.append((secid, diff, current_price, min_price))
         else:
             print(f'diff у {secid} = {diff}')
 
     result.sort(key=lambda x: x[1])
     print(len(result))
-    for secid, diff, current, min_price in result[:20]:
+    for secid, diff, current, min_price in result:
+        print(f"{secid}: {diff*100:.2f}% above min ({current} vs {min_price})")
+    print(f'\n\n diff меньше 1\n')
+    result_more.sort(key=lambda x: x[1])
+    print(len(result_more))
+    for secid, diff, current, min_price in result_more:
         print(f"{secid}: {diff*100:.2f}% above min ({current} vs {min_price})")
 
 
